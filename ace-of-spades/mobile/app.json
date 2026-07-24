@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Ace of Spades",
+    "slug": "ace-of-spades",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "backgroundColor": "#0b1f12",
+      "resizeMode": "contain"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.aceofspades.cardgame",
+      "buildNumber": "1"
+    },
+    "android": {
+      "package": "com.aceofspades.cardgame",
+      "versionCode": 1,
+      "permissions": [],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0b1f12"
+      }
+    },
+    "extra": {
+      "eas": { "projectId": "REPLACE_WITH_YOUR_EAS_PROJECT_ID" }
+    },
+    "plugins": [
+      ["expo-build-properties", {
+        "android": { "compileSdkVersion": 34, "targetSdkVersion": 34, "buildToolsVersion": "34.0.0" }
+      }]
+    ]
+  }
+}
