@@ -3,6 +3,7 @@
     "name": "Ace of Spades",
     "slug": "ace-of-spades",
     "version": "1.0.0",
+    "owner": "saistrikekirans-team",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",
