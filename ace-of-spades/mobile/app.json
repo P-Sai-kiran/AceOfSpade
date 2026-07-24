@@ -26,7 +26,7 @@
       }
     },
     "extra": {
-      "eas": { "projectId": "REPLACE_WITH_YOUR_EAS_PROJECT_ID" }
+      "eas": { "projectId": "1a9773e6-8b69-4979-9d7d-0b9b0dff5195" }
     },
     "plugins": [
       ["expo-build-properties", {
