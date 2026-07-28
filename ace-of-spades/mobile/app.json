@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
-    "icon": "./assets/icon.png",
+    "icon": "icon.png.png",
     "splash": {
       "backgroundColor": "#0b1f12",
       "resizeMode": "contain"
@@ -21,12 +21,12 @@
       "versionCode": 1,
       "permissions": [],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "icon.png.png",
         "backgroundColor": "#0b1f12"
       }
     },
     "extra": {
-      "eas": { "projectId": "1a9773e6-8b69-4979-9d7d-0b9b0dff5195" }
+      "eas": { "projectId": "8caa92ea-fdb1-4fc4-b00a-d62313738505" }
     }
   }
 }
