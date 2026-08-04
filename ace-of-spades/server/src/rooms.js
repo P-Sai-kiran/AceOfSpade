@@ -1,26 +1,24 @@
-// rooms.js — in-memory lobby/room management.
-// For production, back this with Redis or a DB so state survives server
-// restarts and can be shared across multiple server instances.
-
-// uuid inlined for offline test compat
-const uuidv4 = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random()*16|0; return (c==='x'?r:(r&0x3|0x8)).toString(16); });
+// rooms.js — in-memory lobby/room management, including the room creator's
+// chosen table color (cosmetic only, shared by all 4 players).
+const { v4: uuidv4 } = require("uuid");
 const { createGame } = require("./gameEngine");
 
-const rooms = new Map(); // roomCode -> { game, sockets: Map(seat -> socketId), roomCode }
+const rooms = new Map();
+const VALID_COLORS = ["green", "red", "blue"];
 
 function generateRoomCode() {
-  // Short human-shareable code, e.g. "7F3K"
   return uuidv4().slice(0, 4).toUpperCase();
 }
 
-function createRoom() {
+function createRoom(tableColor = "green") {
   let code = generateRoomCode();
   while (rooms.has(code)) code = generateRoomCode();
   rooms.set(code, {
     roomCode: code,
     game: null,
     playerNames: [],
-    sockets: {}, // seat -> socketId
+    sockets: {},
+    tableColor: VALID_COLORS.includes(tableColor) ? tableColor : "green",
   });
   return code;
 }
@@ -32,19 +30,11 @@ function joinRoom(code, playerName, socketId) {
   const seat = room.playerNames.length;
   room.playerNames.push(playerName);
   room.sockets[seat] = socketId;
-
-  if (room.playerNames.length === 4) {
-    room.game = createGame(code, room.playerNames);
-  }
+  if (room.playerNames.length === 4) room.game = createGame(code, room.playerNames);
   return { seat, room };
 }
 
-function getRoom(code) {
-  return rooms.get(code);
-}
+function getRoom(code) { return rooms.get(code); }
+function removeRoom(code) { rooms.delete(code); }
 
-function removeRoom(code) {
-  rooms.delete(code);
-}
-
-module.exports = { createRoom, joinRoom, getRoom, removeRoom, rooms };
+module.exports = { createRoom, joinRoom, getRoom, removeRoom, rooms, VALID_COLORS };
