@@ -43,6 +43,8 @@ function createGame(gameId, playerNames) {
     trickPlayOrder: [],
     currentTrick: { plays: [], baseSuit: null },
     lastTrickWinner: null,
+    trickWinnerSeat: null,
+    awaitingTrickAdvance: false,
     history: [],
     finalRankings: null,
   };
@@ -57,6 +59,8 @@ function startRound(game) {
   game.tricksWonThisRound = { 0:0, 1:0, 2:0, 3:0 };
   game.currentTrick = { plays: [], baseSuit: null };
   game.lastTrickWinner = null;
+  game.trickWinnerSeat = null;
+  game.awaitingTrickAdvance = false;
   game.trickPlayOrder = buildPlayOrder(game.advantageSeat);
   game.phase = "bidding";
   return game;
@@ -88,15 +92,19 @@ function placeBid(game, seat, bid) {
   return game;
 }
 
-function currentSeatToPlay(game) {
-  if (game.phase !== "playing") return null;
-  return game.trickPlayOrder[game.currentTrick.plays.length];
-}
-
 function legalCards(hand, baseSuit) {
   if (!baseSuit) return hand;
   const followSuit = hand.filter(c => c.suit === baseSuit);
   return followSuit.length > 0 ? followSuit : hand;
+}
+
+// currentSeatToPlay returns null while a completed trick is being shown
+// (game.awaitingTrickAdvance), which naturally blocks further plays until
+// the server calls advanceAfterTrick() after a short pause.
+function currentSeatToPlay(game) {
+  if (game.phase !== "playing") return null;
+  if (game.awaitingTrickAdvance) return null;
+  return game.trickPlayOrder[game.currentTrick.plays.length];
 }
 
 function playCard(game, seat, cardId) {
@@ -117,13 +125,29 @@ function playCard(game, seat, cardId) {
   game.currentTrick.plays.push({ seat, card });
 
   if (game.currentTrick.plays.length === 4) {
+    // Trick complete — resolve the winner and PAUSE here (don't clear the
+    // trick or advance the round yet) so every client can show a
+    // "X won this trick!" announcement before the table clears.
     const winnerSeat = resolveTrick(game.currentTrick.plays, game.currentTrick.baseSuit);
     game.tricksWonThisRound[winnerSeat] += 1;
     game.lastTrickWinner = winnerSeat;
+    game.trickWinnerSeat = winnerSeat;
+    game.awaitingTrickAdvance = true;
+  }
+  return game;
+}
 
-    const tricksPlayed = Object.values(game.tricksWonThisRound).reduce((a,b)=>a+b,0);
-    if (tricksPlayed === game.round) finishRound(game);
-    else game.currentTrick = { plays: [], baseSuit: null };
+// Called by the server ~1.8s after a trick completes: clears the table for
+// the next trick, or finishes the round if that was the last trick.
+function advanceAfterTrick(game) {
+  game.awaitingTrickAdvance = false;
+  game.trickWinnerSeat = null;
+
+  const tricksPlayed = Object.values(game.tricksWonThisRound).reduce((a,b)=>a+b,0);
+  if (tricksPlayed === game.round) {
+    finishRound(game);
+  } else {
+    game.currentTrick = { plays: [], baseSuit: null };
   }
   return game;
 }
@@ -168,5 +192,5 @@ function startPlaying(game) {
 module.exports = {
   createGame, startRound, placeBid, playCard, startPlaying,
   currentSeatToPlay, currentBidder, legalCards, scoreForPlayer, tierForRound,
-  buildPlayOrder, buildBiddingOrder, computeRankings,
+  buildPlayOrder, buildBiddingOrder, computeRankings, advanceAfterTrick,
 };
