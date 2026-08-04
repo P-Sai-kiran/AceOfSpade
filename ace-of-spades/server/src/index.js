@@ -1,23 +1,24 @@
+ // index.js — Express + Socket.io server
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
 const { createRoom, joinRoom, getRoom } = require("./rooms");
-const { startRound, placeBid, playCard, startPlaying, currentSeatToPlay, legalCards } = require("./gameEngine");
+const {
+  startRound, placeBid, playCard, startPlaying,
+  currentSeatToPlay, currentBidder, legalCards,
+} = require("./gameEngine");
 
 const app = express();
 app.use(cors());
-app.get("/health", (req, res) => res.json({ ok: true }));
+app.get("/health", (req, res) => res.json({ ok: true, ts: Date.now() }));
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-// Broadcasts different data to each seat:
-// - Only their own hand (Rule 8)
-// - Bids hidden until bids-revealed/playing phase (Rule 13)
 function broadcastState(room) {
   const { game } = room;
   if (!game) return;
-  const bidsPublic = game.phase !== "bidding";
+  const bidsPublic = true; // bids visible to everyone the moment each player locks in
 
   for (const [seatStr, socketId] of Object.entries(room.sockets)) {
     const seat = Number(seatStr);
@@ -27,14 +28,15 @@ function broadcastState(room) {
       players:            game.players,
       yourSeat:           seat,
       yourHand:           game.hands[seat] || [],
-      // Bids: your own visible always; others only after reveal
       bids:               bidsPublic ? game.bids : { [seat]: game.bids[seat] },
       bidsPublic,
       bidsSubmittedCount: Object.keys(game.bidsSubmitted).length,
       hasSubmittedBid:    !!game.bidsSubmitted[seat],
+      bidsSubmitted:      game.bidsSubmitted,
       trickPlayOrder:     game.trickPlayOrder,
       advantageSeat:      game.advantageSeat,
       currentSeatToPlay:  currentSeatToPlay(game),
+      currentBidder:      currentBidder(game),
       legalCardIds:
         game.phase === "playing" && currentSeatToPlay(game) === seat
           ? legalCards(game.hands[seat] || [], game.currentTrick.baseSuit).map(c => c.id)
@@ -43,14 +45,16 @@ function broadcastState(room) {
       tricksWonThisRound: game.tricksWonThisRound,
       history:            game.history,
       finalRankings:      game.finalRankings || null,
+      tableColor:         room.tableColor || "green",
     });
   }
 }
 
 io.on("connection", (socket) => {
 
-  socket.on("create_room", (_, cb) => {
-    cb({ roomCode: createRoom() });
+  socket.on("create_room", (data, cb) => {
+    const tableColor = data?.tableColor || "green";
+    cb({ roomCode: createRoom(tableColor) });
   });
 
   socket.on("join_room", ({ roomCode, playerName }, cb) => {
@@ -60,7 +64,7 @@ io.on("connection", (socket) => {
       socket.data.roomCode = roomCode;
       socket.data.seat = seat;
       cb({ ok: true, seat });
-      io.to(roomCode).emit("lobby_update", { players: room.playerNames });
+      io.to(roomCode).emit("lobby_update", { players: room.playerNames, tableColor: room.tableColor });
       if (room.playerNames.length === 4) {
         startRound(room.game);
         broadcastState(room);
@@ -70,20 +74,14 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Simultaneous blind bidding — any player, any order (Rule 13)
   socket.on("place_bid", ({ bid }, cb) => {
     const room = getRoom(socket.data.roomCode);
     if (!room?.game) return cb?.({ ok: false, error: "No active game" });
     try {
       placeBid(room.game, socket.data.seat, Number(bid));
-      broadcastState(room); // after 4th bid, phase = "bids-revealed"
-
+      broadcastState(room);
       if (room.game.phase === "bids-revealed") {
-        // Auto-advance to playing after 3 s (time for all to read bids)
-        setTimeout(() => {
-          startPlaying(room.game);
-          broadcastState(room);
-        }, 3000);
+        setTimeout(() => { startPlaying(room.game); broadcastState(room); }, 3000);
       }
       cb?.({ ok: true });
     } catch (err) {
@@ -98,10 +96,7 @@ io.on("connection", (socket) => {
       playCard(room.game, socket.data.seat, cardId);
       broadcastState(room);
       if (room.game.phase === "round-end") {
-        setTimeout(() => {
-          startRound(room.game);
-          broadcastState(room);
-        }, 5000); // 5 s to read round scores
+        setTimeout(() => { startRound(room.game); broadcastState(room); }, 5000);
       }
       cb?.({ ok: true });
     } catch (err) {
@@ -109,7 +104,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Rule 27: reconnect support
   socket.on("reconnect_player", ({ roomCode, seat }, cb) => {
     const room = getRoom(roomCode);
     if (!room) return cb?.({ ok: false, error: "Room not found" });
