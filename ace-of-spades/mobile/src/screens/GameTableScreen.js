@@ -1,7 +1,9 @@
 // GameTableScreen — main trick-play screen.
-// - No timer (removed per request)
-// - Broad casino-style oval table, felt color chosen by room creator, gold border always
-// - Lead (base) card of the current trick is highlighted with a gold glow
+// - Portrait (taller-than-wide) oval table so all 4 names fit on a phone screen
+// - Player name + bid/tricks tally enlarged and never clipped
+// - Lead (base) card highlighted with a gold glow
+// - When a trick completes, a "X won this trick!" banner shows for ~1.8s
+//   before the table clears — matches the server-side pause in gameEngine.js
 import React, { useState } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
 import { C, F, R, TABLE_COLORS } from "../theme";
@@ -38,31 +40,37 @@ function OpponentHand({ count=0 }) {
   );
 }
 
-function PlayerPanel({ player, seat, yourSeat, tricksWon, bid, handCount, isAdvantage, isCurrent, position }) {
+// Player panel — name is always fully visible (single line, no clip), and
+// the bid/tricks tally is large and gold so it reads at a glance.
+function PlayerPanel({ player, seat, yourSeat, tricksWon, bid, handCount, isAdvantage, isCurrent, isTrickWinner, position }) {
   const isMe = seat === yourSeat;
   const name = isMe ? "You" : (player?.name || `P${seat+1}`);
   const posStyle = {
-    top:   { alignItems:"center", marginBottom: 4 },
-    left:  { alignItems:"flex-end", marginRight: 8, justifyContent:"center" },
-    right: { alignItems:"flex-start", marginLeft: 8, justifyContent:"center" },
+    top:   { alignItems:"center" },
+    left:  { alignItems:"center" },
+    right: { alignItems:"center" },
   }[position];
 
   return (
-    <View style={[pp.wrap, posStyle]}>
+    <View style={[pp.wrap, posStyle, isTrickWinner && pp.wrapWinner]}>
       {isAdvantage && <Text style={pp.crown}>♠</Text>}
-      <View style={[pp.avatar, isCurrent && pp.avatarActive]}>
+      <View style={[pp.avatar, isCurrent && pp.avatarActive, isTrickWinner && pp.avatarWinner]}>
         <Text style={pp.avatarLetter}>{name.charAt(0).toUpperCase()}</Text>
       </View>
-      <Text style={[pp.name, isCurrent && pp.nameCurrent, isMe && pp.nameMe]}>{name}</Text>
-      <Text style={pp.score}>{tricksWon ?? 0}/{bid ?? "?"}</Text>
+      <Text style={[pp.name, isCurrent && pp.nameCurrent, isMe && pp.nameMe]} numberOfLines={1} ellipsizeMode="tail">
+        {name}
+      </Text>
+      <View style={pp.tally}>
+        <Text style={pp.tallyText}>{tricksWon ?? 0}<Text style={pp.tallySlash}>/</Text>{bid ?? "?"}</Text>
+      </View>
       {position === "top" && <OpponentHand count={handCount} />}
     </View>
   );
 }
 
-// Cards played in the current trick. The lead (base) card — the first one
-// played this trick — gets a gold glow border so everyone can spot it fast.
-function TrickTable({ plays, yourSeat, tableColors }) {
+// Lead (base) card gets a gold glow. While the trick is complete but not yet
+// cleared (server pause), all 4 cards stay visible with the winner's glowing.
+function TrickTable({ plays, yourSeat, tableColors, trickWinnerSeat }) {
   const leadSeat = plays?.[0]?.seat;
   const cardFor = (seat) => plays?.find(p => p.seat === seat)?.card;
   const left  = (yourSeat + 1) % 4;
@@ -73,11 +81,13 @@ function TrickTable({ plays, yourSeat, tableColors }) {
     const card = cardFor(seat);
     if (!card) return <View style={tc.empty} />;
     const red = RED.has(card.suit);
-    const isLead = seat === leadSeat;
+    const isLead = seat === leadSeat && trickWinnerSeat == null;
+    const isWinner = seat === trickWinnerSeat;
     return (
-      <View style={[tc.card, isLead && tc.cardLead]}>
+      <View style={[tc.card, isLead && tc.cardLead, isWinner && tc.cardWinner]}>
         <Text style={[tc.text, red && tc.red]}>{card.rank}{SUIT[card.suit]}</Text>
         {isLead && <Text style={tc.leadTag}>LEAD</Text>}
+        {isWinner && <Text style={tc.winTag}>WON</Text>}
       </View>
     );
   };
@@ -107,12 +117,12 @@ export default function GameTableScreen() {
     currentSeatToPlay, legalCardIds=[],
     tricksWonThisRound={}, bids={},
     trickPlayOrder=[], advantageSeat,
-    tableColor="green",
+    tableColor="green", trickWinnerSeat=null,
   } = state || {};
 
   const tableColors = TABLE_COLORS[tableColor] || TABLE_COLORS.green;
   const myTurn   = currentSeatToPlay === yourSeat;
-  const trickNum = Object.values(tricksWonThisRound).reduce((a,b)=>a+b,0) + 1;
+  const trickNum = Object.values(tricksWonThisRound).reduce((a,b)=>a+b,0) + (trickWinnerSeat==null ? 1 : 0);
   const remaining = round - trickNum + 1;
 
   const left  = (yourSeat + 1) % 4;
@@ -131,54 +141,63 @@ export default function GameTableScreen() {
     finally { setLoading(false); }
   }
 
+  const winnerName = trickWinnerSeat != null
+    ? (trickWinnerSeat === yourSeat ? "You" : (players[trickWinnerSeat]?.name || `P${trickWinnerSeat+1}`))
+    : null;
+
   return (
     <View style={s.bg}>
       <View style={s.header}>
-        <View>
-          <Text style={s.roundText}>Round {round}</Text>
-          <Text style={s.trickText}>
-            Trick {trickNum}/{round}
-            {currentTrick.baseSuit ? `  Lead: ${SUIT[currentTrick.baseSuit]}` : ""}
-          </Text>
-        </View>
+        <Text style={s.roundText}>Round {round}</Text>
+        <Text style={s.trickText}>
+          Trick {Math.min(trickNum, round)}/{round}
+          {currentTrick.baseSuit ? `  Lead: ${SUIT[currentTrick.baseSuit]}` : ""}
+        </Text>
       </View>
+
+      {/* Trick-winner announcement — shown during the server's post-trick pause */}
+      {winnerName && (
+        <View style={s.winnerBanner}>
+          <Text style={s.winnerBannerText}>🏆 {winnerName} won this trick!</Text>
+        </View>
+      )}
 
       <PlayerPanel player={players[top]} seat={top} yourSeat={yourSeat}
         tricksWon={tricksWonThisRound[top]} bid={bids[top]}
         handCount={remaining} isAdvantage={advantageSeat===top}
-        isCurrent={currentSeatToPlay===top} position="top" />
+        isCurrent={currentSeatToPlay===top} isTrickWinner={trickWinnerSeat===top} position="top" />
 
-      <View style={s.midRow}>
+      {/* Portrait oval: taller than wide, so left/right panels always fit
+          on-screen with full names visible — no horizontal overflow. */}
+      <View style={s.tableRow}>
         <PlayerPanel player={players[left]} seat={left} yourSeat={yourSeat}
           tricksWon={tricksWonThisRound[left]} bid={bids[left]}
           handCount={remaining} isAdvantage={advantageSeat===left}
-          isCurrent={currentSeatToPlay===left} position="left" />
+          isCurrent={currentSeatToPlay===left} isTrickWinner={trickWinnerSeat===left} position="left" />
 
-        <View style={s.tableArea}>
-          <View style={[s.felt, { backgroundColor: tableColors.felt, borderColor: C.gold }]}>
-            <TrickTable plays={currentTrick.plays} yourSeat={yourSeat} tableColors={tableColors} />
-          </View>
+        <View style={[s.felt, { backgroundColor: tableColors.felt, borderColor: C.gold }]}>
+          <TrickTable plays={currentTrick.plays} yourSeat={yourSeat} tableColors={tableColors} trickWinnerSeat={trickWinnerSeat} />
         </View>
 
         <PlayerPanel player={players[right]} seat={right} yourSeat={yourSeat}
           tricksWon={tricksWonThisRound[right]} bid={bids[right]}
           handCount={remaining} isAdvantage={advantageSeat===right}
-          isCurrent={currentSeatToPlay===right} position="right" />
+          isCurrent={currentSeatToPlay===right} isTrickWinner={trickWinnerSeat===right} position="right" />
       </View>
 
       <View style={s.youSection}>
         <View style={s.youBar}>
-          <View style={[s.youAvatar, myTurn && s.youAvatarActive]}>
+          <View style={[s.youAvatar, myTurn && s.youAvatarActive, trickWinnerSeat===yourSeat && s.youAvatarWinner]}>
             <Text style={s.youLetter}>{players[yourSeat]?.name?.charAt(0)||"Y"}</Text>
           </View>
-          <View>
-            <Text style={s.youName}>You {advantageSeat===yourSeat ? "♠" : ""}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={s.youName} numberOfLines={1}>You {advantageSeat===yourSeat ? "♠" : ""}</Text>
             <Text style={s.youScore}>{tricksWonThisRound[yourSeat]??0}/{bids[yourSeat]??"?"} tricks</Text>
           </View>
           {myTurn && <View style={s.turnBadge}><Text style={s.turnBadgeText}>YOUR TURN</Text></View>}
-          {!myTurn && currentSeatToPlay != null && (
+          {!myTurn && trickWinnerSeat == null && currentSeatToPlay != null && (
             <View style={[s.turnBadge, s.waitBadge]}>
-              <Text style={s.waitBadgeText}>{players[currentSeatToPlay]?.name || `P${currentSeatToPlay+1}`}'s turn</Text>
+              <Text style={s.waitBadgeText} numberOfLines={1}>{players[currentSeatToPlay]?.name || `P${currentSeatToPlay+1}`}'s turn</Text>
             </View>
           )}
         </View>
@@ -214,80 +233,97 @@ export default function GameTableScreen() {
 }
 
 const cf = StyleSheet.create({
-  card: { width:60, height:84, borderRadius:8, backgroundColor:"#f8f7f2", borderWidth:1, borderColor:"#d0cdc8", justifyContent:"center", alignItems:"center", elevation:3 },
+  card: { width:58, height:80, borderRadius:8, backgroundColor:"#f8f7f2", borderWidth:1, borderColor:"#d0cdc8", justifyContent:"center", alignItems:"center", elevation:3 },
   selected: { borderColor:C.gold, borderWidth:3, transform:[{translateY:-12}] },
   dim:      { opacity:0.35 },
   corner:   { position:"absolute", top:4, left:5, fontSize:10, fontWeight:"700", lineHeight:13 },
   cornerBR: { position:"absolute", bottom:4, right:5, fontSize:10, fontWeight:"700", lineHeight:13, transform:[{rotate:"180deg"}] },
-  center:   { fontSize:30, fontWeight:"800" },
+  center:   { fontSize:28, fontWeight:"800" },
   red:      { color:"#c0392b" },
   blk:      { color:"#111" },
   back:     { backgroundColor:C.cardBack, borderColor:C.cardBack },
   backInner:{ width:"72%", height:"82%", borderRadius:4, borderWidth:1.5, borderColor:C.gold, opacity:0.4 },
 });
 
+// Bigger, always-visible name + tally. Tally uses a pill background so it
+// reads clearly against any table color.
 const pp = StyleSheet.create({
-  wrap:      { alignItems:"center", minWidth:60 },
-  crown:     { fontSize:14, color:C.gold, fontWeight:"800" },
-  avatar:    { width:40, height:40, borderRadius:20, backgroundColor:C.btnGreen, justifyContent:"center", alignItems:"center", borderWidth:2, borderColor:C.border },
+  wrap:      { alignItems:"center", width:76 },
+  wrapWinner:{ transform:[{scale:1.06}] },
+  crown:     { fontSize:13, color:C.gold, fontWeight:"800" },
+  avatar:    { width:38, height:38, borderRadius:19, backgroundColor:C.btnGreen, justifyContent:"center", alignItems:"center", borderWidth:2, borderColor:C.border },
   avatarActive: { borderColor:C.gold, borderWidth:3 },
-  avatarLetter: { color:C.white, fontWeight:"800", fontSize:F.md },
-  name:      { color:C.textSec, fontSize:10, fontWeight:"600", marginTop:3 },
-  nameCurrent:{ color:C.white },
+  avatarWinner: { borderColor:C.gold, borderWidth:3, shadowColor:C.gold, shadowOpacity:0.9, shadowRadius:8, elevation:8 },
+  avatarLetter: { color:C.white, fontWeight:"800", fontSize:F.sm },
+  name:      { color:C.white, fontSize:F.xs, fontWeight:"700", marginTop:3, maxWidth:74, textAlign:"center" },
+  nameCurrent:{ color:C.gold },
   nameMe:    { color:C.gold },
-  score:     { color:C.textDim, fontSize:9 },
+  tally:     { backgroundColor:"rgba(0,0,0,0.35)", borderRadius:R.full, paddingHorizontal:8, paddingVertical:2, marginTop:2 },
+  tallyText: { color:C.gold, fontSize:F.sm, fontWeight:"900" },
+  tallySlash:{ color:C.textDim, fontWeight:"600" },
 });
 
-// Table cards: lead card gets a gold border + subtle glow shadow so the
-// group can instantly see which suit everyone else must follow.
 const tc = StyleSheet.create({
-  table: { alignItems:"center", gap:6 },
+  table: { alignItems:"center", gap:8 },
   row:   { flexDirection:"row", justifyContent:"center" },
-  midRow:{ flexDirection:"row", alignItems:"center", gap:10 },
-  card:  { width:52, height:36, backgroundColor:"#f8f7f2", borderRadius:6, justifyContent:"center", alignItems:"center", elevation:2 },
+  midRow:{ flexDirection:"row", alignItems:"center", gap:8 },
+  card:  { width:46, height:32, backgroundColor:"#f8f7f2", borderRadius:6, justifyContent:"center", alignItems:"center", elevation:2 },
   cardLead: {
     borderWidth: 2.5, borderColor: C.gold,
     shadowColor: C.gold, shadowOpacity: 0.9, shadowRadius: 6, shadowOffset:{width:0,height:0},
     elevation: 8,
   },
-  empty: { width:52, height:36, borderRadius:6, borderWidth:1, borderColor:"rgba(255,255,255,0.15)", borderStyle:"dashed" },
-  text:  { fontSize:11, fontWeight:"700", color:"#111" },
+  cardWinner: {
+    borderWidth: 3, borderColor: C.gold,
+    shadowColor: C.gold, shadowOpacity: 1, shadowRadius: 10, shadowOffset:{width:0,height:0},
+    elevation: 10,
+  },
+  empty: { width:46, height:32, borderRadius:6, borderWidth:1, borderColor:"rgba(255,255,255,0.15)", borderStyle:"dashed" },
+  text:  { fontSize:10, fontWeight:"700", color:"#111" },
   red:   { color:"#c0392b" },
-  leadTag: { position:"absolute", bottom:-14, fontSize:7, color:C.gold, fontWeight:"800", letterSpacing:1 },
-  centerDot: { width:10, height:10, borderRadius:5 },
+  leadTag: { position:"absolute", bottom:-13, fontSize:7, color:C.gold, fontWeight:"800", letterSpacing:1 },
+  winTag:  { position:"absolute", bottom:-13, fontSize:7, color:C.gold, fontWeight:"900", letterSpacing:1 },
+  centerDot: { width:8, height:8, borderRadius:4 },
 });
 
 const s = StyleSheet.create({
   bg:       { flex:1, backgroundColor:C.bg },
-  header:   { flexDirection:"row", justifyContent:"space-between", alignItems:"center", paddingHorizontal:16, paddingTop:44, paddingBottom:8 },
+  header:   { alignItems:"center", paddingTop:40, paddingBottom:4 },
   roundText:{ color:C.gold, fontSize:F.lg, fontWeight:"900" },
   trickText:{ color:C.textSec, fontSize:F.xs },
-  midRow:   { flex:1, flexDirection:"row", alignItems:"center", paddingHorizontal:4 },
-  tableArea:{ flex:1, alignItems:"center", justifyContent:"center" },
-  // Broad casino-style oval: wide and shallow, stadium shape, thick gold border.
-  felt:     {
-    width: 320, height: 150,
-    borderRadius: 90,
-    padding: 16,
+
+  winnerBanner: { backgroundColor:C.goldBg, marginHorizontal:20, borderRadius:R.md, paddingVertical:6, alignItems:"center", borderWidth:1, borderColor:C.gold, marginBottom:2 },
+  winnerBannerText: { color:C.gold, fontWeight:"800", fontSize:F.sm },
+
+  // Portrait table: row is centered, felt is taller than wide (stadium
+  // rotated 90°), leaving guaranteed room for left/right panels either side.
+  tableRow: { flexDirection:"row", alignItems:"center", justifyContent:"center", paddingHorizontal:8, marginVertical:6, gap:6 },
+  felt: {
+    width: 190, height: 260,
+    borderRadius: 95,
+    padding: 12,
     borderWidth: 7,
     justifyContent:"center", alignItems:"center",
     elevation: 6,
     shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 8,
   },
-  youSection:{ paddingHorizontal:16, paddingBottom:4 },
-  youBar:   { flexDirection:"row", alignItems:"center", gap:10, marginBottom:8 },
-  youAvatar:{ width:44, height:44, borderRadius:22, backgroundColor:C.btnGreen, justifyContent:"center", alignItems:"center", borderWidth:2, borderColor:C.border },
+
+  youSection:{ paddingHorizontal:16, paddingBottom:2 },
+  youBar:   { flexDirection:"row", alignItems:"center", gap:10, marginBottom:6 },
+  youAvatar:{ width:42, height:42, borderRadius:21, backgroundColor:C.btnGreen, justifyContent:"center", alignItems:"center", borderWidth:2, borderColor:C.border },
   youAvatarActive:{ borderColor:C.gold },
-  youLetter:{ color:C.white, fontWeight:"800", fontSize:F.lg },
+  youAvatarWinner:{ borderColor:C.gold, borderWidth:3, shadowColor:C.gold, shadowOpacity:0.9, shadowRadius:8, elevation:8 },
+  youLetter:{ color:C.white, fontWeight:"800", fontSize:F.md },
   youName:  { color:C.white, fontWeight:"700", fontSize:F.md },
-  youScore: { color:C.textSec, fontSize:F.xs },
-  turnBadge:{ marginLeft:"auto", backgroundColor:C.gold, borderRadius:R.md, paddingHorizontal:10, paddingVertical:6 },
+  youScore: { color:C.gold, fontSize:F.xs, fontWeight:"700" },
+  turnBadge:{ backgroundColor:C.gold, borderRadius:R.md, paddingHorizontal:10, paddingVertical:6, maxWidth:120 },
   waitBadge:{ backgroundColor:C.bgCard, borderWidth:1, borderColor:C.border },
   turnBadgeText:{ color:C.bg, fontWeight:"800", fontSize:F.xs },
   waitBadgeText:{ color:C.textSec, fontWeight:"600", fontSize:F.xs },
   tapHint:  { color:C.gold, fontSize:F.xs, textAlign:"center", marginBottom:4 },
   error:    { color:C.negative, fontSize:F.xs, textAlign:"center", marginBottom:4 },
-  hand:     { paddingVertical:8, paddingHorizontal:4, gap:6 },
+  hand:     { paddingVertical:6, paddingHorizontal:4, gap:6 },
+
   orderStrip:{ flexDirection:"row", justifyContent:"center", gap:6, paddingVertical:6, paddingHorizontal:12 },
   orderChip:{ paddingHorizontal:10, paddingVertical:4, borderRadius:R.full, backgroundColor:C.bgCard, borderWidth:1, borderColor:C.border, alignItems:"center", minWidth:62 },
   orderChipActive:{ backgroundColor:C.gold, borderColor:C.gold },
