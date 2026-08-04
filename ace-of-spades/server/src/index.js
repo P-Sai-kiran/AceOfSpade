@@ -1,11 +1,11 @@
- // index.js — Express + Socket.io server
+// index.js — Express + Socket.io server
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
 const { createRoom, joinRoom, getRoom } = require("./rooms");
 const {
-  startRound, placeBid, playCard, startPlaying,
+  startRound, placeBid, playCard, startPlaying, advanceAfterTrick,
   currentSeatToPlay, currentBidder, legalCards,
 } = require("./gameEngine");
 
@@ -42,6 +42,7 @@ function broadcastState(room) {
           ? legalCards(game.hands[seat] || [], game.currentTrick.baseSuit).map(c => c.id)
           : [],
       currentTrick:       game.currentTrick,
+      trickWinnerSeat:    game.trickWinnerSeat,
       tricksWonThisRound: game.tricksWonThisRound,
       history:            game.history,
       finalRankings:      game.finalRankings || null,
@@ -94,9 +95,17 @@ io.on("connection", (socket) => {
     if (!room?.game) return cb?.({ ok: false, error: "No active game" });
     try {
       playCard(room.game, socket.data.seat, cardId);
-      broadcastState(room);
-      if (room.game.phase === "round-end") {
-        setTimeout(() => { startRound(room.game); broadcastState(room); }, 5000);
+      broadcastState(room); // shows the completed trick + trickWinnerSeat, if the trick just finished
+
+      if (room.game.awaitingTrickAdvance) {
+        // Pause so everyone can see who won the trick before the table clears.
+        setTimeout(() => {
+          advanceAfterTrick(room.game);
+          broadcastState(room);
+          if (room.game.phase === "round-end") {
+            setTimeout(() => { startRound(room.game); broadcastState(room); }, 5000);
+          }
+        }, 1800);
       }
       cb?.({ ok: true });
     } catch (err) {
